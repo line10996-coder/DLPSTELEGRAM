@@ -8,92 +8,80 @@ import cloudscraper
 TOKEN = "8696621470:AAHjzTCA0x8G4uBy6s6ccT78u69R4ih4IZ8"
 CHAT_ID = "1371125268"
 URL = "https://dlpsgame.com/category/ps5/"
-ARQUIVO = "posts_enviados.txt"
+ARQUIVO = "ultimo_post.txt"
 
 bot = Bot(token=TOKEN)
 
-# 🔥 BYPASS CLOUDFLARE
 scraper = cloudscraper.create_scraper()
 
 # ================= ARQUIVO =================
-def carregar_links():
+def carregar_ultimo():
     if not os.path.exists(ARQUIVO):
-        return set()
+        return None
 
     with open(ARQUIVO, "r", encoding="utf-8") as f:
-        return set(linha.strip() for linha in f.readlines())
+        return f.read().strip()
 
 
-def salvar_link(link):
-    with open(ARQUIVO, "a", encoding="utf-8") as f:
-        f.write(link + "\n")
+def salvar_ultimo(link):
+    with open(ARQUIVO, "w", encoding="utf-8") as f:
+        f.write(link)
 
 
-ultimos_links = carregar_links()
+ultimo_link = carregar_ultimo()
 
 # ================= SCRAPING =================
-def pegar_posts():
+def pegar_ultimo_post():
     try:
-        response = scraper.get(URL, timeout=15)
+        r = scraper.get(URL, timeout=15)
 
-        print("Status:", response.status_code)
+        if r.status_code != 200:
+            print("Erro status:", r.status_code)
+            return None
 
-        if response.status_code != 200:
-            return []
+        soup = BeautifulSoup(r.text, "html.parser")
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        artigo = soup.find("article")
+        if not artigo:
+            return None
 
-        posts = []
-        artigos = soup.find_all("article")
+        a = artigo.find("h2").find("a")
 
-        print("Artigos encontrados:", len(artigos))
+        titulo = a.get_text(strip=True)
+        link = a.get("href")
 
-        for art in artigos:
-            h2 = art.find("h2")
-            if not h2:
-                continue
+        img_tag = artigo.find("img")
 
-            a = h2.find("a")
-            if not a:
-                continue
+        imagem = None
+        if img_tag:
+            imagem = (
+                img_tag.get("data-src")
+                or img_tag.get("data-lazy-src")
+                or img_tag.get("src")
+            )
 
-            titulo = a.get_text(strip=True)
-            link = a.get("href")
+            if imagem and imagem.startswith("//"):
+                imagem = "https:" + imagem
 
-            if not link or "ps5" not in link.lower():
-                continue
+        print(f"DEBUG → {titulo} | IMG: {imagem}")
 
-            # 🔥 imagem da listagem (funciona na nuvem)
-            img_tag = art.find("img")
-
-            imagem = None
-            if img_tag:
-                imagem = (
-                    img_tag.get("data-src")
-                    or img_tag.get("data-lazy-src")
-                    or img_tag.get("src")
-                )
-
-                if imagem and imagem.startswith("//"):
-                    imagem = "https:" + imagem
-
-            print(f"DEBUG → {titulo} | IMG: {imagem}")
-
-            posts.append({
-                "titulo": titulo,
-                "link": link,
-                "imagem": imagem
-            })
-
-        return posts
+        return {
+            "titulo": titulo,
+            "link": link,
+            "imagem": imagem
+        }
 
     except Exception as e:
         print("Erro scraping:", e)
-        return []
+        return None
 
 # ================= ENVIO =================
-async def enviar_post(post):
-    msg = f"🔥 <b>NOVO JOGO PS5</b>\n\n{post['titulo']}\n{post['link']}"
+async def enviar(post):
+    msg = (
+        f"🎮 <b>NOVO JOGO PS5 DISPONÍVEL</b>\n\n"
+        f"<b>{post['titulo']}</b>\n\n"
+        f"🔗 <a href='{post['link']}'>Baixar Agora</a>"
+    )
 
     try:
         if post["imagem"]:
@@ -115,30 +103,31 @@ async def enviar_post(post):
 
 # ================= LOOP =================
 async def main():
-    global ultimos_links
+    global ultimo_link
 
-    print("🚀 BOT INICIADO...")
+    print("🚀 BOT PROFISSIONAL INICIADO...")
 
     while True:
         try:
-            posts = pegar_posts()
+            post = pegar_ultimo_post()
 
-            if not posts:
-                print("Nenhum post encontrado")
+            if not post:
+                print("Nenhum post")
             else:
-                for post in posts:
-                    if post["link"] not in ultimos_links:
-                        await enviar_post(post)
+                if post["link"] != ultimo_link:
+                    print("🔥 NOVO JOGO DETECTADO!")
 
-                        print("✅ Enviado:", post["titulo"])
+                    await enviar(post)
 
-                        salvar_link(post["link"])
-                        ultimos_links.add(post["link"])
+                    salvar_ultimo(post["link"])
+                    ultimo_link = post["link"]
+
+                else:
+                    print("Sem novidades...")
 
         except Exception as e:
             print("Erro geral:", e)
 
         await asyncio.sleep(60)
 
-# ================= START =================
 asyncio.run(main())
