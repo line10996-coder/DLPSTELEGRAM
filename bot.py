@@ -1,8 +1,8 @@
-import requests
-from bs4 import BeautifulSoup
 import asyncio
 import os
+from bs4 import BeautifulSoup
 from telegram import Bot
+import cloudscraper
 
 # ================= CONFIG =================
 TOKEN = "8696621470:AAHjzTCA0x8G4uBy6s6ccT78u69R4ih4IZ8"
@@ -12,9 +12,8 @@ ARQUIVO = "posts_enviados.txt"
 
 bot = Bot(token=TOKEN)
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
+# 🔥 BYPASS CLOUDFLARE
+scraper = cloudscraper.create_scraper()
 
 # ================= ARQUIVO =================
 def carregar_links():
@@ -32,43 +31,10 @@ def salvar_link(link):
 
 ultimos_links = carregar_links()
 
-# ================= PEGAR IMAGEM DO POST =================
-def pegar_imagem_do_post(link):
-    try:
-        r = requests.get(link, headers=HEADERS, timeout=10)
-        s = BeautifulSoup(r.text, "html.parser")
-
-        # 🔥 tenta vários métodos (GARANTIDO)
-        img = s.find("img", class_="wp-post-image")
-
-        if not img:
-            img = s.select_one("figure img")
-
-        if not img:
-            imgs = s.find_all("img")
-            for i in imgs:
-                src = i.get("src")
-                if src and "wp-content" in src:
-                    img = i
-                    break
-
-        if img:
-            src = img.get("src")
-
-            if src and src.startswith("//"):
-                src = "https:" + src
-
-            return src
-
-    except Exception as e:
-        print("Erro imagem:", e)
-
-    return None
-
 # ================= SCRAPING =================
 def pegar_posts():
     try:
-        response = requests.get(URL, headers=HEADERS, timeout=10)
+        response = scraper.get(URL, timeout=15)
 
         print("Status:", response.status_code)
 
@@ -78,19 +44,38 @@ def pegar_posts():
         soup = BeautifulSoup(response.text, "html.parser")
 
         posts = []
+        artigos = soup.find_all("article")
 
-        titulos = soup.select("h2 a")
+        print("Artigos encontrados:", len(artigos))
 
-        print("Títulos encontrados:", len(titulos))
+        for art in artigos:
+            h2 = art.find("h2")
+            if not h2:
+                continue
 
-        for a in titulos:
+            a = h2.find("a")
+            if not a:
+                continue
+
             titulo = a.get_text(strip=True)
             link = a.get("href")
 
             if not link or "ps5" not in link.lower():
                 continue
 
-            imagem = pegar_imagem_do_post(link)
+            # 🔥 imagem da listagem (funciona na nuvem)
+            img_tag = art.find("img")
+
+            imagem = None
+            if img_tag:
+                imagem = (
+                    img_tag.get("data-src")
+                    or img_tag.get("data-lazy-src")
+                    or img_tag.get("src")
+                )
+
+                if imagem and imagem.startswith("//"):
+                    imagem = "https:" + imagem
 
             print(f"DEBUG → {titulo} | IMG: {imagem}")
 
@@ -99,8 +84,6 @@ def pegar_posts():
                 "link": link,
                 "imagem": imagem
             })
-
-        print("Posts válidos:", len(posts))
 
         return posts
 
@@ -129,12 +112,6 @@ async def enviar_post(post):
 
     except Exception as e:
         print("Erro envio:", e)
-
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text=msg,
-            parse_mode="HTML"
-        )
 
 # ================= LOOP =================
 async def main():
