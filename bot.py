@@ -1,87 +1,105 @@
+import requests
+from bs4 import BeautifulSoup
 import asyncio
 import os
-from bs4 import BeautifulSoup
 from telegram import Bot
-import cloudscraper
 
 # ================= CONFIG =================
 TOKEN = "8696621470:AAHjzTCA0x8G4uBy6s6ccT78u69R4ih4IZ8"
 CHAT_ID = "1371125268"
 URL = "https://dlpsgame.com/category/ps5/"
-ARQUIVO = "ultimo_post.txt"
+ARQUIVO = "posts_enviados.txt"
 
 bot = Bot(token=TOKEN)
 
-scraper = cloudscraper.create_scraper()
+HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
 
 # ================= ARQUIVO =================
-def carregar_ultimo():
+def carregar_links():
     if not os.path.exists(ARQUIVO):
-        return None
+        return set()
 
     with open(ARQUIVO, "r", encoding="utf-8") as f:
-        return f.read().strip()
+        return set(linha.strip() for linha in f.readlines())
 
 
-def salvar_ultimo(link):
-    with open(ARQUIVO, "w", encoding="utf-8") as f:
-        f.write(link)
+def salvar_link(link):
+    with open(ARQUIVO, "a", encoding="utf-8") as f:
+        f.write(link + "\n")
 
 
-ultimo_link = carregar_ultimo()
+ultimos_links = carregar_links()
+
+# ================= PEGAR IMAGEM DO POST =================
+def pegar_imagem_do_post(link):
+    try:
+        r = requests.get(link, headers=HEADERS, timeout=10)
+        s = BeautifulSoup(r.text, "html.parser")
+
+        imagens = s.find_all("img")
+
+        for img in imagens:
+            src = img.get("src")
+
+            # 🔥 FILTRO CERTO (esse resolve)
+            if src and "wp-content/uploads" in src:
+                if src.startswith("//"):
+                    src = "https:" + src
+                return src
+
+    except Exception as e:
+        print("Erro imagem:", e)
+
+    return None
 
 # ================= SCRAPING =================
-def pegar_ultimo_post():
+def pegar_posts():
     try:
-        r = scraper.get(URL, timeout=15)
+        response = requests.get(URL, headers=HEADERS, timeout=10)
 
-        if r.status_code != 200:
-            print("Erro status:", r.status_code)
-            return None
+        print("Status:", response.status_code)
 
-        soup = BeautifulSoup(r.text, "html.parser")
+        if response.status_code != 200:
+            return []
 
-        artigo = soup.find("article")
-        if not artigo:
-            return None
+        soup = BeautifulSoup(response.text, "html.parser")
 
-        a = artigo.find("h2").find("a")
+        posts = []
 
-        titulo = a.get_text(strip=True)
-        link = a.get("href")
+        titulos = soup.select("h2 a")
 
-        img_tag = artigo.find("img")
+        print("Títulos encontrados:", len(titulos))
 
-        imagem = None
-        if img_tag:
-            imagem = (
-                img_tag.get("data-src")
-                or img_tag.get("data-lazy-src")
-                or img_tag.get("src")
-            )
+        for a in titulos:
+            titulo = a.get_text(strip=True)
+            link = a.get("href")
 
-            if imagem and imagem.startswith("//"):
-                imagem = "https:" + imagem
+            if not link or "ps5" not in link.lower():
+                continue
 
-        print(f"DEBUG → {titulo} | IMG: {imagem}")
+            imagem = pegar_imagem_do_post(link)
 
-        return {
-            "titulo": titulo,
-            "link": link,
-            "imagem": imagem
-        }
+            print(f"DEBUG → {titulo} | IMG: {imagem}")
+
+            posts.append({
+                "titulo": titulo,
+                "link": link,
+                "imagem": imagem
+            })
+
+        print("Posts válidos:", len(posts))
+
+        return posts
 
     except Exception as e:
         print("Erro scraping:", e)
-        return None
+        return []
 
 # ================= ENVIO =================
-async def enviar(post):
-    msg = (
-        f"🎮 <b>NOVO JOGO PS5 DISPONÍVEL</b>\n\n"
-        f"<b>{post['titulo']}</b>\n\n"
-        f"🔗 <a href='{post['link']}'>Baixar Agora</a>"
-    )
+async def enviar_post(post):
+    msg = f"🔥 <b>NOVO JOGO PS5</b>\n\n{post['titulo']}\n{post['link']}"
 
     try:
         if post["imagem"]:
@@ -101,33 +119,38 @@ async def enviar(post):
     except Exception as e:
         print("Erro envio:", e)
 
+        await bot.send_message(
+            chat_id=CHAT_ID,
+            text=msg,
+            parse_mode="HTML"
+        )
+
 # ================= LOOP =================
 async def main():
-    global ultimo_link
+    global ultimos_links
 
-    print("🚀 BOT PROFISSIONAL INICIADO...")
+    print("🚀 BOT INICIADO...")
 
     while True:
         try:
-            post = pegar_ultimo_post()
+            posts = pegar_posts()
 
-            if not post:
-                print("Nenhum post")
+            if not posts:
+                print("Nenhum post encontrado")
             else:
-                if post["link"] != ultimo_link:
-                    print("🔥 NOVO JOGO DETECTADO!")
+                for post in posts:
+                    if post["link"] not in ultimos_links:
+                        await enviar_post(post)
 
-                    await enviar(post)
+                        print("✅ Enviado:", post["titulo"])
 
-                    salvar_ultimo(post["link"])
-                    ultimo_link = post["link"]
-
-                else:
-                    print("Sem novidades...")
+                        salvar_link(post["link"])
+                        ultimos_links.add(post["link"])
 
         except Exception as e:
             print("Erro geral:", e)
 
         await asyncio.sleep(60)
 
+# ================= START =================
 asyncio.run(main())
