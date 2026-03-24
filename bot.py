@@ -150,7 +150,7 @@ async def main():
         except Exception as e:
             print("Erro geral:", e)
 
-        await asyncio.sleep(60)
+        await asyncio.sleep(300)
 
 # ================= START =================
 asyncio.run(main())
