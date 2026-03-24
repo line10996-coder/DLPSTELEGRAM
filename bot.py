@@ -5,6 +5,8 @@ import os
 from telegram import Bot
 
 # ================= CONFIG =================
+TOKEN = "8696621470:AAHjzTCA0x8G4uBy6s6ccT78u69R4ih4IZ8"
+CHAT_ID = "1371125268"
 URL = "https://dlpsgame.com/category/ps5/"
 ARQUIVO = "posts_enviados.txt"
 
